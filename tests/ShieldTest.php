@@ -48,19 +48,24 @@ beforeEach(function () {
 });
 
 test('a tampered request gets 403 and a payload-free log line', function () {
-    Log::shouldReceive('channel')->once()->andReturnSelf();
+    // Older dependencies log their own deprecations through the same facade, so only the
+    // tampering line is pinned to exactly once; any other warning is let through.
+    Log::shouldReceive('channel')->andReturnSelf();
     Log::shouldReceive('warning')->once()->withArgs(
-        fn (string $message, array $context): bool => $message === 'livewire.tampering'
+        fn (string $message, array $context = []): bool => $message === 'livewire.tampering'
             && ! in_array('do-not-log', $context, true)
     );
+    Log::shouldReceive('warning')->zeroOrMoreTimes();
 
     $this->withHeaders(['X-Livewire' => '1'])->post('/missing', ['x' => 'do-not-log'])->assertForbidden();
 });
 
-// Livewire's own exception carries a render() that Laravel prefers over any callback, so
-// outside debug mode it keeps answering with its bare 419. It is still reported and counted.
+// Livewire 4's exception carries a render() that Laravel prefers over any callback, so there
+// it keeps answering with its bare 419; Livewire 3 gets our 403. Both are reported and counted.
 test('a locked property write is counted and never a 500', function () {
-    $this->withHeaders(['X-Livewire' => '1'])->post('/locked')->assertStatus(419);
+    $status = $this->withHeaders(['X-Livewire' => '1'])->post('/locked')->getStatusCode();
+
+    expect($status)->toBeIn([403, 419]);
 });
 
 test('repeat offenders are throttled', function () {

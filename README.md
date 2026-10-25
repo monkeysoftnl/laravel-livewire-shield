@@ -11,7 +11,7 @@ When someone hand-edits a Livewire request (for example writing to a `#[Locked]`
 ## Requirements
 
 - PHP 8.3+
-- Laravel 11, 12 or 13
+- Laravel 12 or 13
 - Livewire 3 or 4
 
 ## Installation
