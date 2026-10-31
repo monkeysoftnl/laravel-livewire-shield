@@ -5,12 +5,15 @@ on:
     branches: [main]
   pull_request:
     branches: [main]
+  schedule:
+    # Weekly, so new advisories against the dependency range surface without a code change.
+    - cron: '0 6 * * 1'
 
 permissions:
   contents: read
 
 jobs:
-  validate:
+  quality:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -18,20 +21,35 @@ jobs:
       - uses: shivammathur/setup-php@v2
         with:
           php-version: '8.3'
+          coverage: none
           tools: composer
 
       - run: composer validate --strict
 
+      - run: composer update --prefer-dist --no-interaction --no-progress
+
+      - name: Audit dependencies
+        run: composer audit
+
+      - name: Code style
+        run: composer lint
+
+      - name: Static analysis
+        run: composer analyse
+
   test:
-    name: PHP ${{ matrix.php }} / Laravel ${{ matrix.laravel }} / ${{ matrix.stability }}
+    name: PHP ${{ matrix.php }} / Laravel ${{ matrix.laravel }} / Livewire ${{ matrix.livewire }} / ${{ matrix.stability }}
     runs-on: ubuntu-latest
-    needs: validate
+    needs: quality
 
     strategy:
       fail-fast: false
       matrix:
         php: ['8.3', '8.4', '8.5']
         laravel: ['12.*', '13.*']
+        # Same floors as composer.json: pinning '3.*' here would replace them and let prefer-lowest
+        # install a vulnerable release.
+        livewire: ['^3.8.3', '^4.4.8']
         stability: [prefer-lowest, prefer-stable]
         include:
           - laravel: '12.*'
@@ -55,12 +73,12 @@ jobs:
       - uses: actions/cache@v4
         with:
           path: ${{ steps.composer-cache.outputs.dir }}
-          key: composer-${{ matrix.php }}-${{ matrix.laravel }}-${{ matrix.stability }}-${{ hashFiles('composer.json') }}
-          restore-keys: composer-${{ matrix.php }}-${{ matrix.laravel }}-${{ matrix.stability }}-
+          key: composer-${{ matrix.php }}-${{ matrix.laravel }}-${{ matrix.livewire }}-${{ matrix.stability }}-${{ hashFiles('composer.json') }}
+          restore-keys: composer-${{ matrix.php }}-${{ matrix.laravel }}-${{ matrix.livewire }}-${{ matrix.stability }}-
 
-      - name: Pin Laravel and Testbench
+      - name: Pin Laravel, Testbench and Livewire
         run: |
-          composer require "laravel/framework:${{ matrix.laravel }}" "orchestra/testbench:${{ matrix.testbench }}" --no-interaction --no-update
+          composer require "laravel/framework:${{ matrix.laravel }}" "orchestra/testbench:${{ matrix.testbench }}" "livewire/livewire:${{ matrix.livewire }}" --no-interaction --no-update
 
       - name: Install dependencies
         run: composer update --${{ matrix.stability }} --prefer-dist --no-interaction --no-progress

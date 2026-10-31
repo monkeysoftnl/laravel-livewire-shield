@@ -1,10 +1,12 @@
 <?php
 
+use Illuminate\Foundation\Http\Middleware\PreventRequestForgery;
 use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\Route;
-use Livewire\Features\SupportLockedProperties\CannotUpdateLockedPropertyException;
 use Livewire\Component;
 use Livewire\Exceptions\PublicPropertyNotFoundException;
+use Livewire\Features\SupportFileUploads\MissingFileUploadsTraitException;
+use Livewire\Features\SupportLockedProperties\CannotUpdateLockedPropertyException;
 use Livewire\Livewire;
 use Livewire\Wireable;
 use MonkeySoft\LivewireShield\TamperingDetector;
@@ -40,9 +42,10 @@ class StrictComponent extends Component
 }
 
 beforeEach(function () {
-    $this->withoutMiddleware(Illuminate\Foundation\Http\Middleware\PreventRequestForgery::class);
+    $this->withoutMiddleware(PreventRequestForgery::class);
     Route::middleware('web')->post('/locked', fn () => throw new CannotUpdateLockedPropertyException('shareUrl'));
     Route::middleware('web')->post('/missing', fn () => throw new PublicPropertyNotFoundException('nope', 'comp'));
+    Route::middleware('web')->post('/upload', fn () => throw new MissingFileUploadsTraitException(new StrictComponent));
     Route::middleware('web')->post('/plain-type-error', fn () => throw new TypeError('real bug'));
     Route::middleware('web')->post('/ok', fn () => 'fine');
 });
@@ -60,12 +63,9 @@ test('a tampered request gets 403 and a payload-free log line', function () {
     $this->withHeaders(['X-Livewire' => '1'])->post('/missing', ['x' => 'do-not-log'])->assertForbidden();
 });
 
-// Livewire 4's exception carries a render() that Laravel prefers over any callback, so there
-// it keeps answering with its bare 419; Livewire 3 gets our 403. Both are reported and counted.
-test('a locked property write is counted and never a 500', function () {
-    $status = $this->withHeaders(['X-Livewire' => '1'])->post('/locked')->getStatusCode();
-
-    expect($status)->toBeIn([403, 419]);
+// The exception's own render() answers 419 in Livewire 4; the middleware replaces it with 403.
+test('a locked property write is a 403, never a 500', function () {
+    $this->withHeaders(['X-Livewire' => '1'])->post('/locked')->assertForbidden();
 });
 
 test('repeat offenders are throttled', function () {
@@ -74,6 +74,10 @@ test('repeat offenders are throttled', function () {
     }
 
     $this->withHeaders(['X-Livewire' => '1'])->post('/ok')->assertStatus(429)->assertHeader('Retry-After');
+});
+
+test('an upload call on a component without the trait is a 403', function () {
+    $this->withHeaders(['X-Livewire' => '1'])->post('/upload')->assertForbidden();
 });
 
 test('requests without the livewire header are untouched', function () {
